@@ -9,10 +9,11 @@
 ; --------------------------------------------------------------
 (define-module (opencog openpsi)
   #:use-module (opencog)
+  #:use-module (opencog exec)
   #:export (
     ; From action-selector.scm
-    psi-set-action-selector psi-get-action-selector
-    psi-select-rules-per-demand
+    psi-set-action-selector! psi-action-selector
+    psi-select-rules
 
     ; From demand.scm
     psi-get-all-demands psi-get-all-enabled-demands psi-get-all-valid-demands
@@ -28,28 +29,31 @@
     psi-controller-update-weights psi-rule-disable psi-rule-enable
 
     ; From rule.scm
-    psi-get-rules psi-get-all-rules psi-rule? psi-get-all-actions psi-action?
+    psi-get-rules psi-get-all-rules psi-get-all-actions psi-action?
     psi-rule-alias
     psi-partition-rule-with-alias psi-related-goals
     psi-rule-satisfiability psi-get-satisfiable-rules
-    psi-get-weighted-satisfiable-rules psi-get-all-satisfiable-rules
+    psi-get-all-satisfiable-rules
     psi-get-all-weighted-satisfiable-rules psi-context-weight psi-action-weight
-    psi-goal psi-goal? psi-rule-set-alias
+    psi-goal psi-goal? psi-rule-set-alias!
 
     ; From main.scm
-    psi-running? psi-get-loop-count psi-run-continue? psi-step psi-run psi-halt
-    psi-get-logger
+    psi-running? psi-loop-count psi-run-continue? psi-step psi-run psi-halt
+    psi-get-logger psi-component
 
     ; From utilities.scm
-    psi-prefix-str psi-suffix-str psi-get-exact-match psi-get-dual-match
-    psi-get-members
+    psi-prefix-str psi-suffix-str
 
     ; C++ bindings from libopenpsi
+    psi-add-category
+    psi-add-to-category
+    psi-categories
     psi-get-action
     psi-get-context
     psi-get-goal
     psi-imply
     psi-rule
+    psi-rule?
     psi-satisfiable?
     )
 )
@@ -90,16 +94,25 @@
 "
 )
 
+(set-procedure-property! psi-imply 'documentation
+"
+  psi-imply RULE
+
+  Execute the action of the RULE if its satisfiablity has been checked by
+  using psi-satisfiable?. If it hasn't been checked it throws an error.
+"
+)
+
 (set-procedure-property! psi-rule 'documentation
 "
-  psi-rule CONTEXT ACTION GOAL TV DEMAND - create a psi-rule.
+  psi-rule CONTEXT ACTION GOAL TV CATEGORY - create a psi-rule.
 
   Associate an action with a context such that, if the action is
   taken, then the goal will be satisfied. The structure of a rule
   is in the form of an `ImplicationLink`:
 
     (ImplicationLink TV
-        (SequentialAndLink
+        (AndLink
             CONTEXT
             ACTION)
         GOAL)
@@ -120,7 +133,19 @@
   TV is the TruthValue assigned to the ImplicationLink. It should
     be a SimpleTruthValue.
 
-  DEMAND is a Node, representing the demand that this rule affects.
+  CATEGORY is a Node, representing the category that this rule is part of.
+"
+)
+
+(set-procedure-property! psi-rule? 'documentation
+"
+  psi-rule? ATOM
+
+  Returns `#t` or `#f`, depending on whether the passed argument
+  is a valid openpsi-rule or not. A valid psi-rule is one that is created by
+  `psi-rule` function.
+
+  ATOM is the atom to check.
 "
 )
 

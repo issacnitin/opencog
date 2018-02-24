@@ -33,64 +33,91 @@ class OpenPsiRules
 public:
   OpenPsiRules(AtomSpace* as);
 
-  inline Handle add_demand(const std::string& name) {
-    return add_tag(_psi_demand, name);
-  }
-
-  inline Handle add_goal(const std::string& name) {
-    return add_tag(_psi_goal, name);
-  }
-
   /**
    * Add a rule to the atomspace and the psi-rule index.
    * @return An ImplicationLink that forms a psi-rule. The structure
    *  of the rule is
    *    (ImplicationLink TV
-   *      (SequentialAndLink
+   *      (AndLink
    *        context
    *        action)
    *      goal)
    */
   Handle add_rule(const HandleSeq& context, const Handle& action,
-    const Handle& goal, const TruthValuePtr stv, const Handle& demand);
+    const Handle& goal, const TruthValuePtr stv);
+
+  /**
+   * It checks if the rule passed is cached in the index. A valid
+   * structured rule declared in the atomspace but not indexed will
+   * not be considered as a rule.
+   *
+   * @return true if the rule is in the index, false other wise.
+   */
+   // NOTE: An approach where in first the rules are declared then indexed
+   // by searching the atomspace, similar to opencog::UREConfig, can
+   // be followed. But, this way the developer/agents/modules will have
+   // to make the choice of which declarations to process using this module,
+   // there by possibly helping in performance.
+  bool is_rule(const Handle& rule);
+
+  /**
+   * Returns all the categories that were added using add_to_category.
+   *
+   * @return A vector of Handles that represent the categories.
+   */
+  HandleSeq& get_categories();
 
   /**
    * @param rule A psi-rule.
    * @return Context of the given psi-rule.
    */
-  static HandleSeq& get_context(const Handle rule);
+  HandleSeq& get_context(const Handle rule);
 
   /**
    * @param rule A psi-rule.
    * @return Action of the given psi-rule.
    */
-  static Handle get_action(const Handle rule);
+  Handle get_action(const Handle rule);
 
   /**
    * @param rule A psi-rule.
    * @return Goal of the given psi-rule.
    */
-  static Handle get_goal(const Handle rule);
+  Handle get_goal(const Handle rule);
 
   /**
    * @param rule A psi-rule.
    * @return Query atom used to check if the context of the given psi-rule is
    *  satisfiable or not.
    */
-  static PatternLinkPtr get_query(const Handle rule);
+  PatternLinkPtr get_query(const Handle rule);
+
+  /**
+   * Declare a new category by adding the following structured atom into the
+   * atomspace
+   *      (Inheritance new_category (Concept "OpenPsi: category"))
+   *
+   * Such categorization is helpful in defining custom behaviors per category.
+   *
+   * @param new_category The node reprsenting the new category.
+   * @return ConceptNode that represents the category.
+   */
+   // TODO:add predicate to check for membership of category.
+  Handle add_category(const Handle& new_category);
+
+  /**
+   * Add a node to a category. The representation is as follows
+   *    (MemberLink rule category)
+   * Having this enables the possiblity of easily redefining the
+   * representation.
+   *
+   * @param rule A rule to be categorized.
+   * @param category An atom that represents the category.
+   * @return The rule that was passed in.
+   */
+  Handle add_to_category(const Handle& rule, const Handle& category);
 
 private:
-  /**
-   * Declare a new_tag by adding the following structured atom into the
-   * atomspace
-   *      (InheritanceLink (ConceptNode "name") tag_type_node)
-   *
-   * @param tag_type_node The Node from which the new tag node inherites from.
-   * @param name The name of the ConceptNode that is going to be added
-   * @return ConceptNode created.
-   */
-  Handle add_tag(const Handle tag_type_node, const std::string& name);
-
   /**
    * The structure of the tuple is (context, action, goal, query),
    * where queryis a PatternLink that isn't added to the atomspace, and
@@ -104,32 +131,36 @@ private:
    * value being a tuple of its three components. The intention is to minimize
    * the computing required for getting the different component of a rule.
    */
-  static std::map<Handle, PsiTuple> _psi_rules;
+// XXX FIXME storing handles as globals will cause a crash in
+// cxa_finalize when the shared library is unloaded. See bug #2991 for
+// details of why this happens.
+  std::map<Handle, PsiTuple> _psi_rules;
 
   // TODO: Using names that are prefixed with "OpenPsi: " might be a bad idea,
   // because it might hinder interoperability with other components that
   // expect an explicit ontological representation. For historic reasons we
-  // continue using such convention but should be replaces with graph that
+  // continue using such convention but should be replaced with graph that
   // represent the relationships. That way it would be possible to answer
-  // questions about the system the nlp pipeline.
+  // questions about the system using the nlp pipeline.
 
   /**
-   * Node used to declare an action.
+   * Maps from category nodes to Set of rules in that category.
+   * It is static because the assumption is the recategorization of rules
+   * doesn't happen dynamically, for now, i.e., when there is no learning
+   * taking place.
    */
-  static Handle _psi_action;
+  std::map<Handle, HandleSet> _category_index;
 
   /**
-   * Node used to declare a goal.
+   * Node used to declare a category.
    */
-  static Handle _psi_goal;
-
-  /**
-   * Node used to declare a demand.
-   */
-  static Handle _psi_demand;
+  Handle _psi_category;
 
   AtomSpace* _as;
 };
+
+// This function is used to create a single static instance
+OpenPsiRules& openpsi_cache(AtomSpace* as);
 
 } // namespace opencog
 

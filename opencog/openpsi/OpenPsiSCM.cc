@@ -38,6 +38,15 @@ OpenPsiSCM::OpenPsiSCM()
 
 void OpenPsiSCM::init()
 {
+  define_scheme_primitive("psi-add-category", &OpenPsiSCM::add_category,
+    this, "openpsi");
+
+  define_scheme_primitive("psi-add-to-category", &OpenPsiSCM::add_to_category,
+    this, "openpsi");
+
+  define_scheme_primitive("psi-categories", &OpenPsiSCM::get_categories,
+    this, "openpsi");
+
   define_scheme_primitive("psi-get-action", &OpenPsiSCM::get_action,
     this, "openpsi");
 
@@ -53,48 +62,78 @@ void OpenPsiSCM::init()
   define_scheme_primitive("psi-rule", &OpenPsiSCM::add_rule,
     this, "openpsi");
 
+  define_scheme_primitive("psi-rule?", &OpenPsiSCM::is_rule,
+    this, "openpsi");
+
   define_scheme_primitive("psi-satisfiable?", &OpenPsiSCM::is_satisfiable,
     this, "openpsi");
 }
 
+Handle OpenPsiSCM::add_category(const Handle& new_category)
+{
+  AtomSpace* as = SchemeSmob::ss_get_env_as("psi-add-category");
+  return openpsi_cache(as).add_category(new_category);
+}
+
 Handle OpenPsiSCM::add_rule(const HandleSeq& context, const Handle& action,
-  const Handle& goal, const TruthValuePtr stv, const Handle& demand)
+  const Handle& goal, const TruthValuePtr stv, const Handle& category)
 {
   AtomSpace* as = SchemeSmob::ss_get_env_as("psi-rule");
   // TODO: Should this be a singleton? What could be the issues that need
-  // to be handled?
-  OpenPsiRules rule_constructor(as);
-  return rule_constructor.add_rule(context, action, goal, stv, demand);
+  // to be handled? How to handle multiple atomspace, maybe a singleton per
+  // atomspace?
+  Handle rule = openpsi_cache(as).add_rule(context, action, goal, stv);
+  // TODO: Add to multiple categories using scheme rest list.
+  openpsi_cache(as).add_to_category(rule, category);
+  return rule;
+}
+
+Handle OpenPsiSCM::add_to_category(const Handle& rule, const Handle& category)
+{
+  AtomSpace* as = SchemeSmob::ss_get_env_as("psi-add-to-category");
+  return openpsi_cache(as).add_to_category(rule, category);
 }
 
 Handle OpenPsiSCM::get_action(const Handle& rule)
 {
-  return OpenPsiRules::get_action(rule);
+  AtomSpace* as = SchemeSmob::ss_get_env_as("psi-get-action");
+  return openpsi_cache(as).get_action(rule);
+}
+
+HandleSeq& OpenPsiSCM::get_categories()
+{
+  AtomSpace* as = SchemeSmob::ss_get_env_as("psi-categories");
+  return openpsi_cache(as).get_categories();
 }
 
 HandleSeq& OpenPsiSCM::get_context(const Handle& rule)
 {
-  return OpenPsiRules::get_context(rule);
+  AtomSpace* as = SchemeSmob::ss_get_env_as("psi-get-context");
+  return openpsi_cache(as).get_context(rule);
 }
 
 Handle OpenPsiSCM::get_goal(const Handle& rule)
 {
-  return OpenPsiRules::get_goal(rule);
+  AtomSpace* as = SchemeSmob::ss_get_env_as("psi-get-goal");
+  return openpsi_cache(as).get_goal(rule);
 }
 
 Handle OpenPsiSCM::imply(const Handle& rule)
 {
-  // TODO: Rename to psi-satisfiable? once c++ cache is implemented.
   AtomSpace* as = SchemeSmob::ss_get_env_as("psi-imply");
-  OpenPsiImplicator implicator(as);
-  return implicator.imply(rule);
+  return openpsi_implicator(as).imply(rule, openpsi_cache(as));
+}
+
+bool OpenPsiSCM::is_rule(const Handle& rule)
+{
+  AtomSpace* as = SchemeSmob::ss_get_env_as("psi-rule?");
+  return openpsi_cache(as).is_rule(rule);
 }
 
 TruthValuePtr OpenPsiSCM::is_satisfiable(const Handle& rule)
 {
   AtomSpace *as = SchemeSmob::ss_get_env_as("psi-satisfiable?");
-  OpenPsiImplicator implicator(as);
-  return implicator.check_satisfiability(rule);
+  return openpsi_implicator(as).check_satisfiability(rule, openpsi_cache(as));
 }
 
 // ========================================================
