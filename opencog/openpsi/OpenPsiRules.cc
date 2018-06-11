@@ -19,7 +19,7 @@
  * 51 Franklin Street, Fifth Floor, Boston, MA 02110-1301 USA.
  */
 
-#include <opencog/atoms/base/ClassServer.h>
+#include <opencog/atoms/proto/NameServer.h>
 #include <opencog/atoms/base/Link.h>
 #include <opencog/atoms/base/Node.h>
 
@@ -28,7 +28,9 @@
 using namespace opencog;
 
 OpenPsiRules::OpenPsiRules(AtomSpace* as): _as(as)
-{}
+{
+  _action_executed = _as->add_node(PREDICATE_NODE, "action-executed");
+}
 
 Handle OpenPsiRules::add_rule(const HandleSeq& context, const Handle& action,
   const Handle& goal, const TruthValuePtr stv)
@@ -39,9 +41,15 @@ Handle OpenPsiRules::add_rule(const HandleSeq& context, const Handle& action,
   temp_c.push_back(action);
   Handle hca = _as->add_link(AND_LINK, temp_c);
 
-  // Add the psi-rule, set the truthvalue.
+  // Add the psi-rule, set the truthvalue and default record of whether
+  // the action of the rule was executed.
   Handle rule = _as->add_link(IMPLICATION_LINK, hca, goal);
+
+  // No need to recreate the cache entry if it already exists.
+  if (_psi_rules.count(rule)) return rule;
+
   rule->setTruthValue(stv);
+  rule->setValue(_action_executed, ProtoAtomCast(TruthValue::FALSE_TV()));
 
   // Construct the query atom that is used to check satisfiablity. This is
   // done here for performance. If context has only one atom and it is a
@@ -49,7 +57,7 @@ Handle OpenPsiRules::add_rule(const HandleSeq& context, const Handle& action,
   // cast will be valid; else construct a PatternLink wrapping the context
   // in an AndLink.
   if ((1 == context.size()) and
-    classserver().isA(SATISFACTION_LINK, context[0]->get_type())) {
+    nameserver().isA(SATISFACTION_LINK, context[0]->get_type())) {
       // This is for ghost.
 
       // Add to the index of rules.

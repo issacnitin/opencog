@@ -73,6 +73,8 @@
     ((has-match? "^[ ]*\r" str) (result:suffix 'CR location ""))
     ; FIXME: This is not really newline.
     ((string=? "" str) (cons (make-lexical-token 'NEWLINE location #f) ""))
+    ((has-match? "^[ \t]*urge:" str) (result:suffix 'URGE location #f))
+    ((has-match? "^[ \t]*ordered-goal:" str) (result:suffix 'ORD-GOAL location #f))
     ((has-match? "^[ \t]*goal:" str) (result:suffix 'GOAL location #f))
     ((has-match? "^[ \t]*#goal:" str) (result:suffix 'RGOAL location #f))
     ((has-match? "^[ \t]*#!" str) ; This should be checked always before #
@@ -136,11 +138,15 @@
     ((has-match? "^[ ]*!" str) (result:suffix 'NOT location #f))
     ((has-match? "^[ ]*[?]" str) (result:suffix '? location "?"))
     ((has-match? "^[ ]*=" str) (result:suffix 'EQUAL location #f))
+    ; Words with apostrophe, e.g. I'm, it's etc
+    ((has-match? "^[ ]*[a-zA-Z]+['’][a-zA-Z]+" str)
+      (result:suffix 'LITERAL_APOS location
+        (string-trim (match:substring current-match))))
     ; Literals -- words start with a '
     ((has-match? "^[ ]*'[a-zA-Z]+\\b" str)
       (result:suffix 'LITERAL location
         (substring (string-trim (match:substring current-match)) 1)))
-    ((has-match? "^[ ]*[a-zA-Z'-]+\\b" str)
+    ((has-match? "^[ ]*[a-zA-Z-]+\\b" str)
       (if (is-lemma? (string-trim (match:substring current-match)))
         (result:suffix 'LEMMA location
           (string-trim (match:substring current-match)))
@@ -151,15 +157,17 @@
       (result:suffix 'NUM location
         (string-trim (match:substring current-match))))
     ((has-match? "^[ ]*[|]" str)
-     (result:suffix 'VLINE location
-        (string-trim (match:substring current-match))))
+      (result:suffix 'VLINE location
+         (string-trim (match:substring current-match))))
     ((has-match? "^[ ]*," str)
-     (result:suffix 'COMMA location
-        (string-trim (match:substring current-match))))
+      (result:suffix 'COMMA location
+         (string-trim (match:substring current-match))))
     ; This should always be near the end, because it is broadest of all.
-    ((has-match? "^[ \t]*[~'.,_!?0-9a-zA-Z-]+" str)
-        (result:suffix 'STRING location
-          (string-trim (match:substring current-match))))
+    ((has-match? "^[ \t]*[~’'._!?0-9a-zA-Z-]+" str)
+      (result:suffix 'STRING location
+        (string-trim (match:substring current-match))))
+    ; Trailing space
+    ((has-match? "^[ \t]+$" str) (result:suffix 'TRAILSPACE location #f))
     ; NotDefined token is used for errors only and there shouldn't be any rules.
     (else (cons (make-lexical-token 'NotDefined location str) ""))
   )
@@ -222,9 +230,9 @@
     ; MOVAR = Match Variables grounded in their original words
     ; ? = Comparison tests
     ; VLINE = Vertical Line |
-    (CONCEPT TOPIC RESPONDERS REJOINDERS GAMBIT GOAL RGOAL COMMENT SAMPLE_INPUT
-     WHITESPACE
-      (right: LPAREN LSBRACKET << ID VAR * ^ < LEMMA LITERAL NUM DICTKEY
+    (CONCEPT TOPIC RESPONDERS REJOINDERS GAMBIT URGE ORD-GOAL GOAL RGOAL COMMENT
+     SAMPLE_INPUT TRAILSPACE
+      (right: LPAREN LSBRACKET << ID VAR * ^ < LEMMA LITERAL LITERAL_APOS NUM DICTKEY
               STRING *~n *n UVAR MVAR MOVAR EQUAL NOT RESTART LBRACE VLINE COMMA)
       (left: RPAREN RSBRACKET RBRACE >> > DQUOTE)
       (right: ? CR NEWLINE)
@@ -232,20 +240,21 @@
 
     ; Parsing rules (aka nonterminal symbols)
     (inputs
-      (input) :
-        (if $1 (begin (cog-logger-debug ghost-logger "\nParsed:\n~a\n" $1) #t))
-      (inputs input) :
-        (if $2 (begin (cog-logger-debug ghost-logger "\nParsed:\n~a\n" $2) #t))
+      (input) : #t
+      (inputs input) : #t
     )
 
     (input
       (declarations) : $1
-      (goal) : (begin (create-shared-goal
-        (eval-string (string-append "(list " $1 ")"))) $1)
+      (urge) : (set-initial-urge (eval-string (string-append "(list " $1 ")")))
+      (goal) : (create-top-lv-goal (eval-string (string-append "(list " $1 ")")))
+      (ordered-goal) :
+        (create-top-lv-goal (eval-string (string-append "(list " $1 ")")) #t)
       (rule) : $1
       (enter) : $1
       (COMMENT) : #f
       (SAMPLE_INPUT) : #f ; TODO replace with a tester function
+      (TRAILSPACE) : #f
     )
 
     (enter
@@ -275,6 +284,7 @@
         (create-topic $2 (string-split $3 #\sp) (list))
       (TOPIC ID names LSBRACKET RSBRACKET) :
         (create-topic $2 (string-split $3 #\sp) (list))
+      (UVAR EQUAL name) : (create-user-variable $1 $3)
     )
 
     (declaration-sequence
@@ -290,6 +300,7 @@
     (declaration-member
       (lemma) : $1
       (literal) : $1
+      (literal-apos) : $1
       (phrase) : $1
       (concept) : $1
       (sequence) : $1
@@ -386,26 +397,36 @@
           (list) "" $1)
     )
 
+    (urge
+      (URGE LPAREN goal-members RPAREN) : $3
+    )
+
+    (ordered-goal
+      (ORD-GOAL LPAREN goal-members RPAREN) : $3
+    )
+
     (rule-goal
-        (RGOAL LPAREN goal-members RPAREN) : $3
+      (RGOAL LPAREN goal-members RPAREN) : $3
     )
 
     (goal
-        (GOAL LPAREN goal-members RPAREN) : $3
+      (GOAL LPAREN goal-members RPAREN) : $3
     )
 
     (goal-members
-        (goal-member) : $1
-        (goal-members goal-member) : (format #f "~a ~a" $1 $2)
+      (goal-member) : $1
+      (goal-members goal-member) : (format #f "~a ~a" $1 $2)
     )
 
     (goal-member
-        (LEMMA EQUAL NUM) : (format #f "(cons \"~a\" ~a)" $1 $3)
-        (STRING EQUAL NUM) : (format #f "(cons \"~a\" ~a)" $1 $3)
+      (LITERAL EQUAL NUM) : (format #f "(cons \"~a\" ~a)" $1 $3)
+      (LITERAL_APOS EQUAL NUM) : (format #f "(cons \"~a\" ~a)" $1 $3)
+      (LEMMA EQUAL NUM) : (format #f "(cons \"~a\" ~a)" $1 $3)
+      (STRING EQUAL NUM) : (format #f "(cons \"~a\" ~a)" $1 $3)
     )
 
     (context
-      (LPAREN RPAREN) : "(cons 'wildcard (cons 0 -1))"
+      (LPAREN RPAREN) : "(cons 'empty-context (list))"
       (LPAREN negation RPAREN) : $2
       (LPAREN context-patterns RPAREN) : $2
       (LPAREN negation context-patterns RPAREN) : (format #f "~a ~a" $2 $3)
@@ -425,6 +446,7 @@
       (wildcard) : $1
       (lemma) : $1
       (literal) : $1
+      (literal-apos) : $1
       (phrase) : $1
       (concept) : $1
       (variable) : $1
@@ -445,6 +467,9 @@
       (action-pattern) : $1
       (action-patterns action-pattern) : (format #f "~a ~a" $1 $2)
       (action-patterns enter) : $1
+      (action-patterns TRAILSPACE) : $1
+      (action-patterns COMMENT) : $1
+      (COMMENT action-patterns) : $2
     )
 
     (action-pattern
@@ -454,6 +479,7 @@
       (DQUOTE) : "(cons 'str \"\\\"\")"
       (LEMMA) : (format #f "(cons 'str \"~a\")" $1)
       (LITERAL) : (format #f "(cons 'str \"~a\")" $1)
+      (LITERAL_APOS) : (format #f "(cons 'str \"~a\")" $1)
       (NUM) : (format #f "(cons 'str \"~a\")" $1)
       (STRING) : (format #f "(cons 'str \"~a\")" $1)
       (variable) : $1
@@ -480,6 +506,10 @@
       (STRING) : (format #f "(cons 'word \"~a\")" $1)
     )
 
+    (literal-apos
+      (LITERAL_APOS) : (format #f "(cons 'word-apos \"~a\")" $1)
+    )
+
     (phrase
       (DQUOTE phrase-terms DQUOTE) : (format #f "(cons 'phrase \"~a\")" $2)
     )
@@ -492,6 +522,7 @@
     (phrase-term
       (LEMMA) : $1
       (LITERAL) : $1
+      (LITERAL_APOS) : $1
       (STRING) : $1
     )
 
@@ -517,6 +548,7 @@
     (choice-term
       (lemma) : $1
       (literal) : $1
+      (literal-apos) : $1
       (phrase) : $1
       (concept) : $1
       (sequence) : $1
@@ -561,6 +593,7 @@
     (negation-term
       (lemma) : $1
       (literal) : $1
+      (literal-apos) : $1
       (phrase) : $1
       (concept) : $1
     )
@@ -588,14 +621,18 @@
 
     (args
       (arg) : $1
-      (args arg) : (format #f "~a ~a" $1 $2)
+      (arg COMMA args) : (format #f "~a ~a" $1 $3)
     )
 
     (arg
       (LEMMA) : (format #f "(cons 'arg \"~a\")" $1)
       (LITERAL) : (format #f "(cons 'arg \"~a\")" $1)
+      (LITERAL_APOS) : (format #f "(cons 'arg \"~a\")" $1)
+      (LITERAL NUM) : (format #f "(cons 'arg \"~a~a\")" $1 $2)
+      (NUM) : (format #f "(cons 'arg \"~a\")" $1)
       (STRING) : (format #f "(cons 'arg \"~a\")" $1)
       (variable-grounding) : $1
+      (UVAR) : (format #f "(cons 'get_uvar \"~a\")" $1)
     )
 
     (sequence
@@ -612,6 +649,7 @@
       (wildcard) : $1
       (lemma) : $1
       (literal) : $1
+      (literal-apos) : $1
       (phrase) : $1
     )
 
@@ -643,6 +681,7 @@
     (unordered-term
       (lemma) : $1
       (literal) : $1
+      (literal-apos) : $1
       (phrase) : $1
       (concept) : $1
       (choice) : $1
@@ -699,5 +738,7 @@
   Parse a topic file in a Guile shell, for debugging mainly.
 "
   (define parser (cs-parser))
-  (parser (cs-lexer (open-file-input-port file)) error)
+  (define fp (open-file-input-port file))
+  (set-port-encoding! fp "UTF-8")
+  (parser (cs-lexer fp) error)
 )

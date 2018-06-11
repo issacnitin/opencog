@@ -25,6 +25,7 @@
 #include <uuid/uuid.h>
 #include <link-grammar/link-includes.h>
 
+#include <opencog/atoms/proto/NameServer.h>
 #include <opencog/atoms/base/Node.h>
 #include <opencog/atoms/core/NumberNode.h>
 #include <opencog/atomspace/AtomSpace.h>
@@ -86,9 +87,9 @@ LGParseLink::LGParseLink(const HandleSeq& oset, Type t)
 	: FunctionLink(oset, t)
 {
 	// Type must be as expected
-	if (not classserver().isA(t, LG_PARSE_LINK))
+	if (not nameserver().isA(t, LG_PARSE_LINK))
 	{
-		const std::string& tname = classserver().getTypeName(t);
+		const std::string& tname = nameserver().getTypeName(t);
 		throw InvalidParamException(TRACE_INFO,
 			"Expecting an LgParseLink, got %s", tname.c_str());
 	}
@@ -100,9 +101,9 @@ LGParseLink::LGParseLink(const Link& l)
 {
 	// Type must be as expected
 	Type tparse = l.get_type();
-	if (not classserver().isA(tparse, LG_PARSE_LINK))
+	if (not nameserver().isA(tparse, LG_PARSE_LINK))
 	{
-		const std::string& tname = classserver().getTypeName(tparse);
+		const std::string& tname = nameserver().getTypeName(tparse);
 		throw InvalidParamException(TRACE_INFO,
 			"Expecting an LgParseLink, got %s", tname.c_str());
 	}
@@ -112,9 +113,9 @@ LGParseMinimal::LGParseMinimal(const HandleSeq& oset, Type t)
 	: LGParseLink(oset, t)
 {
 	// Type must be as expected
-	if (not classserver().isA(t, LG_PARSE_MINIMAL))
+	if (not nameserver().isA(t, LG_PARSE_MINIMAL))
 	{
-		const std::string& tname = classserver().getTypeName(t);
+		const std::string& tname = nameserver().getTypeName(t);
 		throw InvalidParamException(TRACE_INFO,
 			"Expecting an LgParseMinimal, got %s", tname.c_str());
 	}
@@ -126,9 +127,9 @@ LGParseMinimal::LGParseMinimal(const Link& l)
 {
 	// Type must be as expected
 	Type tparse = l.get_type();
-	if (not classserver().isA(tparse, LG_PARSE_MINIMAL))
+	if (not nameserver().isA(tparse, LG_PARSE_MINIMAL))
 	{
-		const std::string& tname = classserver().getTypeName(tparse);
+		const std::string& tname = nameserver().getTypeName(tparse);
 		throw InvalidParamException(TRACE_INFO,
 			"Expecting an LgParseMinimal, got %s", tname.c_str());
 	}
@@ -136,7 +137,7 @@ LGParseMinimal::LGParseMinimal(const Link& l)
 
 // =================================================================
 
-Handle LGParseLink::execute() const
+ProtoAtomPtr LGParseLink::execute() const
 {
 	if (PHRASE_NODE != _outgoing[0]->get_type()) return Handle();
 	if (LG_DICT_NODE != _outgoing[1]->get_type()) return Handle();
@@ -180,6 +181,13 @@ Handle LGParseLink::execute() const
 	Parse_Options opts = parse_options_create();
 	parse_options_set_verbosity(opts, 0);
 
+	// For the ANY language, this code is being used for sampling.
+	// In this case, we are not concerned about reproducibility,
+	// but want different, truly random results each time through.
+	// Viz, every time we have a four-word sentence, we want a
+	// different parse for it, each time. Bug #3065.
+	parse_options_set_repeatable_rand(opts, 0);
+
 	// Count the number of parses
 	int num_linkages = sentence_parse(sent, opts);
 	if (num_linkages < 0)
@@ -205,13 +213,17 @@ Handle LGParseLink::execute() const
 	}
 
 	// The number of linkages to process.
-	int max_linkages = 4;
+	int max_linkages = 0;
 	if (3 == _outgoing.size())
 	{
 		NumberNodePtr nnp(NumberNodeCast(_outgoing[2]));
 		max_linkages = nnp->get_value() + 0.5;
 	}
-	if (max_linkages < num_linkages) num_linkages = max_linkages;
+	// Takes limit from parameter only if it's positive and smaller
+	if ((max_linkages > 0) && (max_linkages < num_linkages))
+	{
+		num_linkages = max_linkages;
+	}
 
 	// Hmm. I hope that uuid_generate() won't block if there is not
 	// enough entropy in the entropy pool....
@@ -281,10 +293,14 @@ Handle LGParseLink::cvt_linkage(Linkage lkg, int i, const char* idstr,
 		if (0 == w and 0 == strcmp(wrd, "LEFT-WALL")) wrd = "###LEFT-WALL###";
 		if (nwords-1 == w and 0 == strcmp(wrd, "RIGHT-WALL")) wrd = "###RIGHT-WALL###";
 
+		uuid_t uu2;
+		uuid_generate(uu2);
+		char idstr2[37];
+		uuid_unparse(uu2, idstr2);
 		char buff[801] = "";
 		strncat(buff, wrd, 800);
 		strncat(buff, "@", 800);
-		strncat(buff, parseid, 800);
+		strncat(buff, idstr2, 800);
 		Handle winst(as->add_node(WORD_INSTANCE_NODE, buff));
 		wrds.push_back(winst);
 

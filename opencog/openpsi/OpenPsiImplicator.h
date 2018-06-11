@@ -65,6 +65,16 @@ public:
    */
   Handle imply(const Handle& rule, OpenPsiRules& opr);
 
+  /**
+   * Returns TRUE_TV if the last time an instantiation was tried on the
+   * given rule a grounding was possible and the instantation completed.
+   * FALSE_TV is returned if the rule is unsatisfiable and thus the
+   * action was not instantiated.
+   *
+   * @param rule An openpsi rule.
+   */
+  TruthValuePtr was_action_executed(const Handle rule);
+
 private:
   /**
    * Cache used to store context with the variable groundings. Values
@@ -73,6 +83,9 @@ private:
    * computation that doesn't add any value.
    */
   std::map<Handle, HandleMap> _satisfiability_cache;
+
+  // To store what pattern we've seen so far
+  std::set<Handle> _pattern_seen;
 
   /**
    * An empty map used for clearing cache entries, or to denote absence
@@ -83,6 +96,10 @@ private:
   // Because two of the ancestor classes that this class inherites
   // from have _as variable.
   using DefaultPatternMatchCB::_as;
+
+  // Predicate used to set a value on whether an action was executed or not
+  Handle _action_executed;
+
 };
 
 // This function is used to create a single static instance

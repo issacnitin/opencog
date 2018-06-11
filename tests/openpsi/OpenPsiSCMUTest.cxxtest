@@ -158,11 +158,11 @@ public:
         // Test 1:
         // Continuese from the state created by the previous test.
         auto result_2_1 = \
-            _scm->eval_h("(car (psi-select-rules (demand-1)))");
+            _scm->eval_h("(car (psi-select-rules (component-1)))");
         CHKERR
         TSM_ASSERT_EQUALS("Expected a single rule", rule_1 , result_2_1);
 
-        auto result_2_2 = _scm->eval("(psi-select-rules (demand-2))");
+        auto result_2_2 = _scm->eval("(psi-select-rules (component-2))");
         CHKERR
         TSM_ASSERT_EQUALS("Expected ()", "()\n", result_2_2);
         CHKERR
@@ -172,12 +172,12 @@ public:
         _scm->eval("(groundable-content-2)");
         CHKERR
         auto result_3_1 = \
-            _scm->eval_h("(car (psi-select-rules (demand-1)))");
+            _scm->eval_h("(car (psi-select-rules (component-1)))");
         CHKERR
         TSM_ASSERT_EQUALS("Expected a single rule", rule_1 , result_3_1);
 
         auto result_3_2 = \
-            _scm->eval_h("(car (psi-select-rules (demand-2)))");
+            _scm->eval_h("(car (psi-select-rules (component-2)))");
         CHKERR
         TSM_ASSERT_EQUALS("Expected a single rule", rule_2 , result_3_2);
 
@@ -233,7 +233,7 @@ public:
         CHKERR
 
         // For rule-1
-	// Nothing changes
+        // Nothing changes
         auto result_3_1 = _scm->eval("(act-3-present?)");
         CHKERR
         TS_ASSERT_EQUALS("#t\n", result_3_1);
@@ -252,9 +252,9 @@ public:
       logger().info("BEGIN TEST: %s", __FUNCTION__);
 
       // Common Setup
-      _scm->eval("(define d1 (demand-1))");
+      _scm->eval("(define d1 (component-1))");
       CHKERR
-      _scm->eval("(define d2 (demand-2))");
+      _scm->eval("(define d2 (component-2))");
       CHKERR
 
       // Tests
@@ -273,6 +273,61 @@ public:
       auto result_4 = _scm->eval("(test-psi-halt)");
       CHKERR
       TS_ASSERT_EQUALS("#t\n", result_2);
+
+      logger().info("END TEST: %s", __FUNCTION__);
+    }
+
+    // Check psi-goal, psi-dgv, psi-set-dgv!, psi-goal-value
+    // psi-set-gv!, psi-urge, psi-increase-urge and psi-decrease-urge.
+    void test_psi_goal_functions()
+    {
+      logger().info("BEGIN TEST: %s", __FUNCTION__);
+
+      // Common Setup
+      auto goal_1 = _scm->eval_h("goal-1");
+      auto goal_2 = _scm->eval_h("goal-2");
+
+      // Check goal-value setting and getting.
+      auto gv_1 = _scm->eval("(psi-goal-value goal-1)");
+      CHKERR
+      TS_ASSERT_EQUALS("0.1\n", gv_1);
+
+      auto gv_2 = _scm->eval_h("(psi-set-gv! goal-1 0.4)");
+      CHKERR
+      TS_ASSERT_EQUALS(goal_1, gv_2);
+
+      auto gv_3 = _scm->eval("(psi-goal-value goal-1)");
+      CHKERR
+      TS_ASSERT_EQUALS("0.4\n", gv_3);
+
+      // Check desired-goal-value setting and getting.
+      auto dgv_1 = _scm->eval("(psi-dgv goal-2)");
+      CHKERR
+      TS_ASSERT_EQUALS("0.5\n", dgv_1);
+
+      auto dgv_2 = _scm->eval_h("(psi-set-dgv! goal-2 0.3)");
+      CHKERR
+      TS_ASSERT_EQUALS(goal_2, dgv_2);
+
+      auto dgv_3 = _scm->eval("(psi-dgv goal-2)");
+      CHKERR
+      TS_ASSERT_EQUALS("0.3\n", dgv_3);
+
+      // Check calcuation of psi-urge.
+      auto u_1 = _scm->eval("(psi-urge goal-1)");
+      CHKERR
+      TS_ASSERT_EQUALS("0.6\n", u_1);
+
+
+      // Check that psi-decrease-urge and psi-increase-urge are
+      // working as expected
+      auto increase_result = _scm->eval("(test_psi_goal_functions_1)");
+      CHKERR
+      TS_ASSERT_EQUALS("#t\n", increase_result);
+
+      auto decrease_result = _scm->eval("(test_psi_goal_functions_1)");
+      CHKERR
+      TS_ASSERT_EQUALS("#t\n", decrease_result);
 
       logger().info("END TEST: %s", __FUNCTION__);
     }

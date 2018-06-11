@@ -14,15 +14,6 @@
 ; have a unique name; however, the current chatbot uses the same name
 ; for all chat rules.
 
-
-(use-modules (ice-9 threads)) ; For `par-map`
-(use-modules (ice-9 optargs)) ; For `define*`
-(use-modules (srfi srfi-1)) ; For `drop-right`, `append-map`, etc.
-(use-modules (opencog) (opencog query))
-
-(load "demand.scm")
-(load "utilities.scm")
-
 ; --------------------------------------------------------------
 ; Used as a key for naming rules
 (define psi-rule-name-predicate-node (Predicate "alias"))
@@ -30,22 +21,88 @@
 (define psi-action-node (Concept "action"))
 ; Used to declare the set of goals.
 (define psi-goal-node (Concept "goal"))
+; Key used to declare the desired-goal-value
+(define dgv-key (Predicate "desired-goal-value"))
 
 ; --------------------------------------------------------------
-(define (psi-goal NAME)
+(define (psi-set-gv! goal gv)
 "
-  psi-goal NAME
+  psi-set-gv! GOAL GV
 
-  Create and return a ConceptNode that represents an OpenPsi goal.
-  The NAME should be a string.
+  Set the goal-value of GOAL to GV. GV is a number.
+"
+  (cog-set-value! goal (Predicate "value") (FloatValue gv))
+)
+
+; --------------------------------------------------------------
+(define (psi-goal-value goal)
+"
+  psi-goal-value GOAL
+
+  Return the present value of GOAL.
+"
+  (define gv (cog-value goal (Predicate "value")))
+  (if (null? gv)
+    (error (format #f "Goal \"~a\" has not been created?" (cog-name goal)))
+    (cog-value-ref gv 0))
+)
+
+; --------------------------------------------------------------
+(define (psi-set-dgv! goal num)
+"
+  psi-set-dgv! GOAL NUM
+
+  Returns GOAL after setting its desired-goal-value to NUM.
+"
+  (cog-set-value! goal dgv-key (FloatValue num))
+)
+
+; --------------------------------------------------------------
+(define (psi-dgv goal)
+"
+  psi-dgv GOAL
+
+  Returns the present desired-goal-value for GOAL. GOAL is a node
+  representin the goal concerned.
+"
+  (define gv (cog-value goal dgv-key))
+  (if (null? gv)
+    (error (format #f "Goal \"~a\" has not been created?" (cog-name goal)))
+    (cog-value-ref gv 0))
+)
+
+; --------------------------------------------------------------
+(define* (psi-goal name value #:optional (dgv 1))
+"
+  psi-goal NAME VALUE [DGV]
+
+  Create and return (ConceptNode NAME) that represents the OpenPsi goal
+  called NAME. Also sets the goal-value to VALUE.  If DGV is passed
+  then it is used as the desired-goal-value for the goal otherwise,
+  1 is assumed to be the desired-goal-value.
+
+  VALUE and DGV should be in the range [0, 1].
 "
   ; NOTE: Why not make this part of psi-rule function? Because, developers
   ; might want to specify the behavior they prefer, when it comes to how
   ; to measure the level of achivement of goal, and how the goal's measurement
   ; value should change.
-  (let* ((goal-node (ConceptNode NAME)))
-    (InheritanceLink goal-node psi-goal-node)
-    goal-node
+  (if (not (and (<= 0 dgv) (<= dgv 1)))
+    (error "Expected 0 <= dgv <= 1, got" dgv))
+  (if (not (and (<= 0 value) (<= value 1)))
+    (error "Expected 0 <= value <= 1, got" value))
+
+  (let* ((goal (Concept name)))
+    (InheritanceLink goal psi-goal-node)
+    (psi-set-gv! goal value)
+    ; A value is used instead of an EvalutionLink b/c it is simpler and faster
+    ; to change. Of course a StateLink can be used. At present there isn't
+    ; any process that uses that explicit(aka queryable) information, thus
+    ; nothing is lost.
+    (if (and (<= 0 dgv) (<= dgv 1))
+      (psi-set-dgv! goal dgv)
+      (error "Expected 0 <= dgv <= 1, got" dgv)
+    )
   )
 )
 
@@ -60,23 +117,65 @@
 )
 
 ; --------------------------------------------------------------
+(define (psi-urge goal)
+"
+  psi-urge GOAL
+
+  Returns the urge value of GOAL. Urge is calculated as (GOAL_VALUE - DGV),
+  where GOAL_VALUE is the present value of the goal, and DGV is the
+  desired-goal-value for the GOAL.
+"
+  ; TODO: Add utilities for declaring custom urge formula.
+  (- (psi-dgv goal) (psi-goal-value goal))
+)
+
+; --------------------------------------------------------------
+(define (psi-decrease-urge goal value)
+"
+  psi-decrease-urge GOAL VALUE
+
+  Return GOAL after decreasing the urge by given value. Decreasing means
+  minimizing the difference between the desired-goal-value and present
+  goal-value, thus VALUE should be a positive number. This assumes
+  the desired-goal-value to be 1.
+"
+  ; TODO: Add utilities for declaring custom decrease-urge formula.
+  (let* ((u (psi-urge goal))
+    (gv (- 1 (- u (abs value)))))
+
+    (cond
+      ((equal? 0.0 u) goal)
+      ((<= 1 gv) (psi-set-gv! goal 1))
+      (else (psi-set-gv! goal gv)))
+  )
+)
+
+; --------------------------------------------------------------
+(define (psi-increase-urge goal value)
+"
+  psi-increase-urge GOAL VALUE
+
+  Return GOAL after increasing the magnitude of the urge by VALUE. VALUE
+  should be a positive number. This assumes the desired-goal-value to be 1.
+"
+  ; TODO: Add utilities for declaring custom increase-urge formula.
+  (let* ((u (psi-urge goal))
+    (gv (- 1 (+ u (abs value)))))
+
+    (cond
+      ((<= 1 gv) (psi-set-gv! goal 1))
+      ((>= 0 gv) (psi-set-gv! goal 0))
+      (else (psi-set-gv! goal gv)))
+  )
+)
+
+; --------------------------------------------------------------
 (define (psi-get-rules category)
 "
   psi-get-rules CATEGORY
     Returns a list of all psi-rules that are member of CATEGORY.
 "
   (cog-chase-link 'MemberLink 'ImplicationLink category)
-)
-
-; --------------------------------------------------------------
-(define (psi-action? ATOM)
-"
-  psi-action? ATOM
-    Check if ATOM is an action and return `#t`, if it is, and `#f`
-    otherwise. An atom is an action if it a member of the set
-    represented by (ConceptNode \"action\").
-"
-  (not (null?  (cog-link 'MemberLink ATOM psi-action)))
 )
 
 ; --------------------------------------------------------------
@@ -93,7 +192,7 @@
     psi-rule-name-predicate-node
     (ListLink
       rule
-      (ConceptNode (string-append psi-prefix-str name))))
+      (ConceptNode name)))
 
   ; TODO Uncomment after testing with ghost
   ;(cog-set-value!
@@ -101,6 +200,7 @@
   ;  psi-rule-name-predicate-node
   ;  (StringValue name))
 )
+
 ; --------------------------------------------------------------
 (define (psi-rule-alias rule)
 "
@@ -184,8 +284,8 @@
     ; stv-list, for the purpose of estimating the truthvalue of a
     ; context when it is true.
     (stv
-      (fold * 1 (map (lambda (x) (tv-mean x)) stv-list))
-      (fold min 1 (map (lambda (x) (tv-conf x)) stv-list)))
+      (fold * 1 (map (lambda (x) (cog-tv-mean x)) stv-list))
+      (fold min 1 (map (lambda (x) (cog-tv-conf x)) stv-list)))
   )
 
   ; map-in-order is used to simulate AndLink assuming
